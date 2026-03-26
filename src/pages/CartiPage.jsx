@@ -7,7 +7,7 @@ import { db } from '../firebase/config';
 import { BrowserMultiFormatReader, BrowserCodeReader } from '@zxing/browser';
 
 const EMPTY = {
-  titlu: '', autor: '', isbn: '', editura: '',
+  titlu: '', autor: '', isbn: '', nrInregistrare: '', editura: '',
   anPublicare: '', numarExemplare: 1, gen: '', descriere: '',
 };
 
@@ -291,7 +291,7 @@ export default function CartiPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2>Catalog Carti</h2>
+        <h2>📚 Catalog Cărți</h2>
         <div className="page-actions">
           <button className="btn btn-secondary" onClick={() => setShowScanner(true)}>
             &#128247; Scaneaza ISBN
@@ -314,13 +314,13 @@ export default function CartiPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>#</th><th>Titlu</th><th>Autor</th><th>ISBN</th>
+                <th>#</th><th>Nr. Reg.</th><th>Titlu</th><th>Autor</th><th>ISBN</th>
                 <th>Gen</th><th>An</th><th>Disponibile</th><th>Actiuni</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0
-                ? <tr><td colSpan="8" className="empty-row">Nicio carte gasita</td></tr>
+                ? <tr><td colSpan="9" className="empty-row">Nicio carte gasita</td></tr>
                 : filtered.map((c, i) => {
                   const total  = c.numarExemplare || 1;
                   const imprum = activeLoansMap[c.id] || 0;
@@ -328,6 +328,7 @@ export default function CartiPage() {
                   return (
                     <tr key={c.id}>
                       <td>{i + 1}</td>
+                      <td>{c.nrInregistrare || '—'}</td>
                       <td><strong>{c.titlu}</strong></td>
                       <td>{c.autor}</td>
                       <td>
@@ -342,7 +343,7 @@ export default function CartiPage() {
                           className={`badge ${avail === 0 ? 'badge-red' : avail <= Math.ceil(total / 2) ? 'badge-yellow' : 'badge-green'}`}
                           title={`${imprum} imprumutate din ${total}`}
                         >
-                          {avail === 0 ? '✗ Nicio' : avail} {avail !== 0 && 'din'} {avail !== 0 && total}
+                          {avail === 0 ? `0 din ${total}` : `${avail} din ${total}`}
                         </span>
                       </td>
                       <td>
@@ -396,6 +397,13 @@ export default function CartiPage() {
                     &#128247;
                   </button>
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>Nr. Inregistrare</label>
+                <input placeholder="ex: 1234"
+                  value={form.nrInregistrare}
+                  onChange={e => setForm({ ...form, nrInregistrare: e.target.value })} />
               </div>
 
               {isbnLoading && (

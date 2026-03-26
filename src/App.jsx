@@ -6,10 +6,10 @@ import RapoartePage from './pages/RapoartePage';
 import AuthModal, { useAuth } from './components/AuthModal';
 
 const TABS = [
-  { id: 'elevi',        label: 'Elevi' },
-  { id: 'carti',        label: 'Catalog Carti' },
-  { id: 'imprumuturi',  label: 'Imprumuturi' },
-  { id: 'rapoarte',     label: 'Rapoarte' },
+  { id: 'elevi',        label: 'Elevi',          icon: '👥' },
+  { id: 'carti',        label: 'Catalog Cărți',  icon: '📚' },
+  { id: 'imprumuturi',  label: 'Împrumuturi',    icon: '📖' },
+  { id: 'rapoarte',     label: 'Rapoarte',        icon: '📊' },
 ];
 
 export default function App() {
@@ -27,8 +27,8 @@ export default function App() {
           <div className="header-brand">
             <div className="header-logo">&#128218;</div>
             <div className="header-text">
-              <h1>Biblioteca Scolara</h1>
-              <p>Scoala Nr. 5 Stefan cel Mare Vaslui</p>
+              <h1>Bibliotecă Școlară</h1>
+              <p>Școala Gimnazială „Ștefan cel Mare" Vaslui</p>
             </div>
           </div>
           <button className="auth-logout-btn" onClick={logout} title="Deconectare">
@@ -44,6 +44,7 @@ export default function App() {
             className={`nav-tab ${activeTab === tab.id ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
           >
+            <span className="nav-tab-icon">{tab.icon}</span>
             {tab.label}
           </button>
         ))}
@@ -55,6 +56,18 @@ export default function App() {
         {activeTab === 'imprumuturi' && <ImprumuturiPage />}
         {activeTab === 'rapoarte'    && <RapoartePage />}
       </main>
+
+      <footer className="app-footer">
+        <div className="footer-content">
+          <span className="footer-copy">
+            &copy; {new Date().getFullYear()} Școala Gimnazială „Ștefan cel Mare" Vaslui
+          </span>
+          <span className="footer-sep">·</span>
+          <span className="footer-dev">
+            Dezvoltat de <strong>Patrichi A. Ștefan</strong> — Persoană Fizică Autorizată
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

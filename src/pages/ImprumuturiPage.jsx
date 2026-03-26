@@ -6,6 +6,8 @@ import {
 import { db } from '../firebase/config';
 
 /* helpers */
+const norm = s => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
 const fmtDate = (ts) => {
   if (!ts) return '-';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -249,8 +251,8 @@ export default function ImprumuturiPage() {
       return true; // toate
     })
     .filter(imp =>
-      `${imp.elevNume} ${imp.elevPrenume} ${imp.elevClasa} ${imp.carteTitlu}`
-        .toLowerCase().includes(search.toLowerCase())
+      norm(`${imp.elevNume} ${imp.elevPrenume} ${imp.elevClasa} ${imp.carteTitlu}`)
+        .includes(norm(search))
     );
 
   const counts = {
@@ -263,8 +265,8 @@ export default function ImprumuturiPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2>Gestiune Imprumuturi</h2>
-        <button className="btn btn-primary" onClick={() => { resetForm(); setShowForm(true); }}>
+        <h2>📖 Gestiune Împrumuturi</h2>
+        <button className="btn btn-primary btn-hero" onClick={() => { resetForm(); setShowForm(true); }}>
           + Inregistreaza Imprumut
         </button>
       </div>
@@ -393,7 +395,12 @@ export default function ImprumuturiPage() {
                   value={form.elevId}
                   onChange={id => setForm(f => ({ ...f, elevId: id }))}
                   placeholder="Cauta dupa nume, prenume sau clasa..."
-                  filterFn={(el, q) => `${el.nume} ${el.prenume} ${el.clasa} ${el.cnp || ''}`.toLowerCase().includes(q.toLowerCase())}
+                  filterFn={(el, q) => {
+                    const nq = norm(q);
+                    return norm(el.nume).startsWith(nq)
+                      || (nq.length >= 2 && norm(el.clasa).startsWith(nq))
+                      || (el.cnp || '').startsWith(q);
+                  }}
                   renderItem={el => (
                     <>
                       <div className="ss-item-title">
@@ -419,7 +426,13 @@ export default function ImprumuturiPage() {
                   value={form.carteId}
                   onChange={id => setForm(f => ({ ...f, carteId: id }))}
                   placeholder="Cauta dupa titlu, autor sau ISBN..."
-                  filterFn={(c, q) => `${c.titlu} ${c.autor} ${c.isbn || ''} ${c.gen || ''}`.toLowerCase().includes(q.toLowerCase())}
+                  filterFn={(c, q) => {
+                    const nq = norm(q);
+                    return norm(c.titlu).includes(nq)
+                      || norm(c.autor).includes(nq)
+                      || (c.isbn || '').replace(/[-\s]/g, '').includes(q.replace(/[-\s]/g, ''))
+                      || norm(c.gen).startsWith(nq);
+                  }}
                   renderItem={c => {
                     const avail = (c.numarExemplare || 1) - (activeLoansPerBook[c.id] || 0);
                     const unavail = avail <= 0;

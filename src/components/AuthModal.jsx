@@ -59,8 +59,8 @@ export default function AuthModal({ onLogin }) {
         {/* Header */}
         <div className="auth-header">
           <div className="auth-logo">&#128218;</div>
-          <h1 className="auth-title">Biblioteca Scolara</h1>
-          <p className="auth-subtitle">Scoala Nr. 5 Stefan cel Mare Vaslui</p>
+          <h1 className="auth-title">Bibliotecă Școlară</h1>
+          <p className="auth-subtitle">Școala Gimnazială „Ștefan cel Mare" Vaslui</p>
           <div className="auth-badge">&#128274; Acces Restricționat</div>
         </div>
 

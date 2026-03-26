@@ -16,17 +16,11 @@ const fmtDate = (ts) => {
 };
 
 const safe = (str = '') =>
-  str
-    .replace(/[ăâ]/gi, m => /[A-Z]/.test(m) ? 'A' : 'a')
-    .replace(/î/gi,   m => /[A-Z]/.test(m) ? 'I' : 'i')
-    .replace(/[șş]/gi, m => /[A-Z]/.test(m) ? 'S' : 's')
-    .replace(/[țţ]/gi, m => /[A-Z]/.test(m) ? 'T' : 't');
-
-const CLASE = ['PREG. A', '1A', '2B', '3C', '4D'];
-const clasaOrder = (c = '') => {
-  const idx = CLASE.indexOf((c || '').toUpperCase().trim());
-  return idx === -1 ? 999 : idx;
-};
+  String(str || '')
+    .replace(/[ĂÂ]/g, 'A').replace(/[ăâ]/g, 'a')
+    .replace(/Î/g, 'I').replace(/î/g, 'i')
+    .replace(/[ȘŞ]/g, 'S').replace(/[șş]/g, 's')
+    .replace(/[ȚŢ]/g, 'T').replace(/[țţ]/g, 't');
 
 export default function EleviPage() {
   const [elevi, setElevi] = useState([]);
@@ -34,7 +28,9 @@ export default function EleviPage() {
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
-  const [form, setForm] = useState({ nume: '', prenume: '', clasa: '', anScolar: '2024-2025' });
+  const [form, setForm] = useState({
+    nume: '', prenume: '', clasa: '', anScolar: '2024-2025'
+  });
   const fileRef = useRef();
 
   useEffect(() => { loadElevi(); }, []);
@@ -50,44 +46,32 @@ export default function EleviPage() {
 
   const addElev = async (e) => {
     e.preventDefault();
-    try {
-      await addDoc(collection(db, 'elevi'), { ...form, dataAdaugare: Timestamp.now() });
-      setForm({ nume: '', prenume: '', clasa: '', anScolar: '2024-2025' });
-      setShowForm(false);
-      loadElevi();
-    } catch (e) { alert('Eroare: ' + e.message); }
+    await addDoc(collection(db, 'elevi'), {
+      ...form,
+      dataAdaugare: Timestamp.now()
+    });
+    setForm({ nume: '', prenume: '', clasa: '', anScolar: '2024-2025' });
+    setShowForm(false);
+    loadElevi();
   };
 
   const deleteElev = async (id) => {
-    if (!confirm('Stergi acest elev?')) return;
-    try {
-      await deleteDoc(doc(db, 'elevi', id));
-      loadElevi();
-    } catch (e) { alert(e.message); }
+    if (!confirm('Ștergi elevul?')) return;
+    await deleteDoc(doc(db, 'elevi', id));
+    loadElevi();
   };
 
-  /* ─── MODIFICARE NOUĂ: ȘTERGE TOT ─── */
   const deleteAllElevi = async () => {
-    const confirmare = window.confirm(
-      `⚠️ ATENȚIE: Ești pe cale să ștergi TOȚI cei ${elevi.length} elevi din bază.\n\n` +
-      `Această acțiune este IREVERSIBILĂ. Sigur vrei să continui?`
-    );
-    if (!confirmare) return;
-
-    setLoading(true);
-    try {
-      const promises = elevi.map(elev => deleteDoc(doc(db, 'elevi', elev.id)));
-      await Promise.all(promises);
-      alert('Baza de date a fost curățată cu succes!');
-      loadElevi();
-    } catch (e) { alert('Eroare la ștergere: ' + e.message); }
-    setLoading(false);
+    if (!confirm('⚠️ Ștergi TOȚI elevii?')) return;
+    await Promise.all(elevi.map(e => deleteDoc(doc(db, 'elevi', e.id))));
+    loadElevi();
   };
 
-  /* ─── Import Excel ─── */
+  /* ─── IMPORT EXCEL (CORECT CLASE) ─── */
   const importExcel = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     setImporting(true);
 
     try {
@@ -96,188 +80,163 @@ export default function EleviPage() {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-      const normalize = (str) =>
-        String(str || "").toLowerCase().replace(/\s+/g, '')
-          .replace(/[ăâ]/g, 'a').replace(/î/g, 'i')
-          .replace(/[șş]/g, 's').replace(/[țţ]/g, 't').trim();
+      const clean = v => String(v || '').trim();
 
-      const clean = (v) => String(v || '').trim();
+      const eleviCurati = rows.slice(1).map(r => {
+        let clasaRaw = clean(r[2]);
 
-      const headerRowIndex = rows.findIndex(r => {
-        const norm = r.map(cell => normalize(cell));
-        return norm.includes('nume') && 
-               (norm.includes('prenume1') || norm.includes('prenume')) &&
-               (norm.includes('numeclasa') || norm.includes('formatiune') || norm.includes('clasa'));
-      });
+        // normalizează clasa
+        let clasa = clasaRaw
+          .replace(/CLASA/i, '')
+          .replace(/\s+/g, '')
+          .toUpperCase();
 
-      if (headerRowIndex === -1) throw new Error("Nu am găsit tabelul!");
-
-      const detectedHeaders = rows[headerRowIndex].map(h => normalize(h));
-      const col = {};
-      detectedHeaders.forEach((h, i) => {
-        if (h === 'cnp') col.cnp = i;
-        if (h === 'nume') col.nume = i;
-        if (h === 'prenume1' || h === 'prenume') col.prenume1 = i;
-        if (h === 'prenume2') col.prenume2 = i;
-        if (h === 'prenume3') col.prenume3 = i;
-        if (h === 'numeclasa') col.clasa = i;
-        if (h === 'tipformatiune') col.tipFormatiune = i;
-        else if ((h === 'clasa' || (h.endsWith('formatiune') && h !== 'tipformatiune')) && col.clasa === undefined) col.clasa = i;
-      });
-
-      const eleviCurati = rows.slice(headerRowIndex + 1).map(row => {
-        const p1 = row[col.prenume1];
-        const p2 = col.prenume2 !== undefined ? row[col.prenume2] : '';
-        const p3 = col.prenume3 !== undefined ? row[col.prenume3] : '';
-        const prenumeComplet = [p1, p2, p3].map(v => clean(v)).filter(Boolean).join(' ');
+        if (/PREG/i.test(clasaRaw)) {
+          const litera = clasaRaw.match(/[A-Z]$/i)?.[0] || '';
+          clasa = `Pregătitoare ${litera.toUpperCase()}`;
+        }
 
         return {
-          cnp: col.cnp !== undefined ? clean(row[col.cnp]) : '',
-          nume: clean(row[col.nume]),
-          prenume: prenumeComplet,
-          clasa: (() => {
-            const numeClasa = clean(row[col.clasa] || '');
-            if (col.tipFormatiune !== undefined) {
-              const romanToNumber = (r) => {
-                const map = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8 };
-                return map[r] || r;
-              };
-              const tipRaw = clean(row[col.tipFormatiune] || '');
-              const roman = tipRaw.toUpperCase().replace(/CLASA|A|\-/g, '').trim();
-              const nivel = romanToNumber(roman);
-              return `${nivel}${numeClasa}`.toUpperCase();
-            }
-            return numeClasa.toUpperCase();
-          })(),
+          nume: clean(r[0]),
+          prenume: clean(r[1]),
+          clasa,
           anScolar: '2024-2025',
           dataAdaugare: Timestamp.now()
         };
-      }).filter(el => el.nume.length > 1 && el.prenume.length > 1);
+      }).filter(e => e.nume && e.prenume);
 
-      await Promise.all(eleviCurati.map(el => addDoc(collection(db, 'elevi'), el)));
-      await loadElevi();
-      alert(`Importat ${eleviCurati.length} elevi.`);
-    } catch (err) { alert('Eroare: ' + err.message); }
+      await Promise.all(
+        eleviCurati.map(el => addDoc(collection(db, 'elevi'), el))
+      );
+
+      loadElevi();
+      alert(`Importați ${eleviCurati.length} elevi`);
+    } catch (err) {
+      alert(err.message);
+    }
+
     setImporting(false);
     e.target.value = '';
   };
 
-  /* ─── Generare PDF ─── */
+  /* ─── PDF STABIL ─── */
   const generatePDF = async (elev) => {
-    try {
-      const snap = await getDocs(query(collection(db, 'imprumuturi'), where('elevId', '==', elev.id)));
-      const loans = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const da = a.dataImprumut?.toDate ? a.dataImprumut.toDate() : new Date(a.dataImprumut);
-          const db_ = b.dataImprumut?.toDate ? b.dataImprumut.toDate() : new Date(b.dataImprumut);
-          return da - db_;
-        });
+    const snap = await getDocs(
+      query(collection(db, 'imprumuturi'), where('elevId', '==', elev.id))
+    );
 
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      pdf.setFillColor(26, 86, 219);
-      pdf.rect(0, 0, 210, 38, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('SCOALA NR. 5 STEFAN CEL MARE VASLUI', 105, 11, { align: 'center' });
-      pdf.text('FISA DE IMPRUMUT', 105, 31, { align: 'center' });
+    const loans = snap.docs.map(d => d.data());
 
-      pdf.setTextColor(0);
-      pdf.rect(14, 43, 182, 32);
-      pdf.text(`Nume si Prenume: ${safe(elev.nume)} ${safe(elev.prenume)}`, 18, 58);
-      pdf.text(`Clasa: ${safe(elev.clasa)}`, 18, 65);
+    const pdf = new jsPDF();
 
-      autoTable(pdf, {
-        startY: 82,
-        head: [['Nr.', 'Titlu carte', 'Autor', 'Data imprumut', 'Returnat']],
-        body: loans.map((l, i) => [
-          i + 1, safe(l.carteTitlu), safe(l.carteAutor), fmtDate(l.dataImprumut),
-          l.stare === 'returnat' ? 'Da' : 'Nu'
-        ]),
-        headStyles: { fillColor: [26, 86, 219] }
-      });
-      pdf.save(`Fisa_${elev.nume}_${elev.clasa}.pdf`);
-    } catch (e) { alert('Eroare PDF: ' + e.message); }
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(16);
+    pdf.text('FIȘĂ ÎMPRUMUT', 105, 15, { align: 'center' });
+
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(`Nume: ${elev.nume} ${elev.prenume}`, 14, 30);
+    pdf.text(`Clasa: ${elev.clasa}`, 14, 37);
+
+    autoTable(pdf, {
+      startY: 45,
+      head: [['Nr', 'Titlu', 'Autor', 'Data', 'Status']],
+      body: loans.map((l, i) => [
+        i + 1,
+        safe(l.carteTitlu),
+        safe(l.carteAutor),
+        fmtDate(l.dataImprumut),
+        l.stare
+      ]),
+      styles: { font: 'helvetica' }
+    });
+
+    pdf.save(`${elev.nume}_${elev.prenume}.pdf`);
   };
 
-  const filtered = elevi
-    .filter(e => `${e.cnp || ''} ${e.nume} ${e.prenume} ${e.clasa}`.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => {
-      const diff = clasaOrder(a.clasa) - clasaOrder(b.clasa);
-      if (diff !== 0) return diff;
-      return (a.nume || '').localeCompare(b.nume || '', 'ro');
-    });
+  const filtered = elevi.filter(e =>
+    `${e.nume} ${e.prenume} ${e.clasa}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h2>Evidenta Elevilor</h2>
-        <div className="page-actions">
-          {/* BUTONUL NOU DE ȘTERGERE TOT */}
-          {elevi.length > 0 && (
-            <button className="btn" onClick={deleteAllElevi} style={{ backgroundColor: '#e11d48', color: 'white', marginRight: '10px' }}>
-              🗑️ Golire Listă ({elevi.length})
-            </button>
-          )}
+      <h2>📚 Elevi</h2>
 
-          <button className="btn btn-secondary" disabled={importing} onClick={() => fileRef.current.click()}>
-            {importing ? 'Se importa...' : '📥 Import Excel'}
-          </button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={importExcel} />
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}>+ Adauga Elev</button>
-        </div>
-      </div>
+      <button onClick={() => fileRef.current.click()}>
+        {importing ? 'Import...' : 'Import Excel'}
+      </button>
 
-      <div className="search-bar">
-        <input className="search-input" placeholder="Cauta nume sau clasa..." value={search} onChange={e => setSearch(e.target.value)} />
-        <span className="search-count">{filtered.length} elevi</span>
-      </div>
+      <button onClick={deleteAllElevi}>
+        Șterge tot ({elevi.length})
+      </button>
 
-      {loading ? <div className="loading">Se incarca...</div> : (
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
-              <tr><th>#</th><th>CNP</th><th>Nume</th><th>Prenume</th><th>Clasa</th><th>Actiuni</th></tr>
-            </thead>
-            <tbody>
-              {filtered.map((elev, i) => (
-                <tr key={elev.id}>
-                  <td>{i + 1}</td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>{elev.cnp || '-'}</td>
-                  <td><strong>{elev.nume}</strong></td>
-                  <td>{elev.prenume}</td>
-                  <td><span className="badge badge-blue">{elev.clasa}</span></td>
-                  <td>
-                    <button className="btn-icon" onClick={() => generatePDF(elev)}>📄</button>
-                    <button className="btn-icon" onClick={() => deleteElev(elev.id)}>🗑️</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <button onClick={() => setShowForm(true)}>
+        + Elev
+      </button>
+
+      <input
+        ref={fileRef}
+        type="file"
+        hidden
+        onChange={importExcel}
+      />
+
+      <input
+        placeholder="Caută..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+      />
+
+      {loading ? 'Loading...' : (
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Nume</th>
+              <th>Prenume</th>
+              <th>Clasa</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((e, i) => (
+              <tr key={e.id}>
+                <td>{i + 1}</td>
+                <td>{e.nume}</td>
+                <td>{e.prenume}</td>
+                <td>{e.clasa}</td>
+                <td>
+                  <button onClick={() => generatePDF(e)}>PDF</button>
+                  <button onClick={() => deleteElev(e.id)}>X</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
 
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <div className="modal-header"><h3>Adauga Elev</h3><button onClick={() => setShowForm(false)}>✕</button></div>
-            <form className="form" onSubmit={addElev}>
-              <div className="form-row">
-                <input required placeholder="Nume" value={form.nume} onChange={e => setForm({ ...form, nume: e.target.value })} />
-                <input required placeholder="Prenume" value={form.prenume} onChange={e => setForm({ ...form, prenume: e.target.value })} />
-              </div>
-              <div className="form-row">
-                <select required value={form.clasa} onChange={e => setForm({ ...form, clasa: e.target.value })}>
-                  <option value="">-- Alege clasa --</option>
-                  {CLASE.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div className="form-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Anuleaza</button>
-                <button type="submit" className="btn btn-primary">Salveaza</button>
-              </div>
-            </form>
-          </div>
+        <div>
+          <form onSubmit={addElev}>
+            <input
+              placeholder="Nume"
+              value={form.nume}
+              onChange={e => setForm({ ...form, nume: e.target.value })}
+            />
+            <input
+              placeholder="Prenume"
+              value={form.prenume}
+              onChange={e => setForm({ ...form, prenume: e.target.value })}
+            />
+            <input
+              placeholder="Clasa"
+              value={form.clasa}
+              onChange={e => setForm({ ...form, clasa: e.target.value })}
+            />
+            <button>Salvează</button>
+          </form>
         </div>
       )}
     </div>
