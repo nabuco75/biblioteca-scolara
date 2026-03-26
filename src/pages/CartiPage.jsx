@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  collection, addDoc, getDocs, deleteDoc,
-  doc, query, orderBy, Timestamp
+  collection, addDoc, updateDoc, getDocs, deleteDoc,
+  doc, query, orderBy, where, Timestamp
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { BrowserMultiFormatReader, BrowserCodeReader } from '@zxing/browser';
@@ -135,80 +135,153 @@ function ScannerModal({ onScan, onClose }) {
    ════════════════════════════════════════════════ */
 export default function CartiPage() {
   const [carti,       setCarti]      = useState([]);
+  const [activeLoansMap, setActiveLoansMap] = useState({});
   const [loading,     setLoading]    = useState(true);
   const [showForm,    setShowForm]   = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [search,      setSearch]     = useState('');
   const [isbnLoading, setIsbnLoading] = useState(false);
-  const [form, setForm] = useState(EMPTY);
+  const [form,        setForm]       = useState(EMPTY);
+  const [editingId,   setEditingId]  = useState(null); // null = adaugare, string = editare
 
   useEffect(() => { loadCarti(); }, []);
 
   const loadCarti = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'carti'), orderBy('titlu')));
+      const [snap, impSnap] = await Promise.all([
+        getDocs(query(collection(db, 'carti'), orderBy('titlu'))),
+        getDocs(query(collection(db, 'imprumuturi'), where('stare', '==', 'activ'))),
+      ]);
       setCarti(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const map = {};
+      impSnap.docs.forEach(d => {
+        const { carteId } = d.data();
+        if (carteId) map[carteId] = (map[carteId] || 0) + 1;
+      });
+      setActiveLoansMap(map);
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
   /* ─── ISBN lookup ─── */
   const fetchISBN = async (isbnOverride) => {
-    const isbn = (isbnOverride ?? form.isbn).replace(/[-\s]/g, '');
-    if (isbn.length < 10) { alert('ISBN invalid (minim 10 caractere)'); return; }
-    setIsbnLoading(true);
-    try {
-      const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+  const raw = isbnOverride ?? form.isbn;
+  const isbn = raw.replace(/[-\s]/g, '');
+
+  if (isbn.length < 10) {
+    alert('ISBN invalid');
+    return;
+  }
+
+  setIsbnLoading(true);
+
+  try {
+    // 🔹 1. cauta in Firestore
+    const q = query(collection(db, 'carti'), where('isbn', '==', isbn));
+    const snap = await getDocs(q);
+
+    if (!snap.empty) {
+      setForm(f => ({ ...f, ...snap.docs[0].data() }));
+      return;
+    }
+
+    // 🔹 2. Google Books (principal)
+    let found = false;
+
+    const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const gData = await gRes.json();
+
+    if (gData.totalItems > 0) {
+      const bk = gData.items[0].volumeInfo;
+      setForm(f => ({
+        ...f,
+        isbn,
+        titlu: bk.title || '',
+        autor: bk.authors?.join(', ') || '',
+        editura: bk.publisher || '',
+        anPublicare: bk.publishedDate?.slice(0, 4) || '',
+        descriere: bk.description || '',
+      }));
+      found = true;
+    }
+
+    // 🔹 3. fallback OpenLibrary
+    if (!found) {
+      const res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
       const data = await res.json();
-      const key  = `ISBN:${isbn}`;
-      if (!data[key]) {
-        alert('Cartea nu a fost gasita pe OpenLibrary pentru acest ISBN.\nPoti completa manual campurile.');
-      } else {
+      const key = `ISBN:${isbn}`;
+      if (data[key]) {
         const bk = data[key];
         setForm(f => ({
           ...f,
           isbn,
-          titlu:       bk.title                   || f.titlu,
-          autor:       bk.authors?.[0]?.name       || f.autor,
-          editura:     bk.publishers?.[0]?.name    || f.editura,
-          anPublicare: bk.publish_date?.slice(-4)  || f.anPublicare,
-          gen:         bk.subjects?.[0]?.name      || f.gen,
-          descriere:   bk.notes?.value || bk.notes || f.descriere,
+          titlu: bk.title || '',
+          autor: bk.authors?.[0]?.name || '',
+          editura: bk.publishers?.[0]?.name || '',
+          anPublicare: bk.publish_date?.slice(-4) || '',
         }));
+        found = true;
       }
-    } catch (e) { alert('Eroare retea: ' + e.message); }
+    }
+
+    // 🔹 4. fallback final
+    if (!found) {
+      alert('Cartea nu exista in baze externe. Introdu manual (va fi salvata pentru viitor).');
+    }
+
+  } catch (e) {
+    alert('Eroare: ' + e.message);
+  } finally {
     setIsbnLoading(false);
-  };
+  }
+};
 
   /* ─── Called when scanner detects a barcode ─── */
   const handleScan = async (isbn) => {
     setShowScanner(false);
     setForm({ ...EMPTY, isbn });
     setShowForm(true);
-    // auto-fetch after state settles
-    setTimeout(() => fetchISBN(isbn), 100);
+    await fetchISBN(isbn);
   };
 
-  const addCarte = async (e) => {
+  const openEdit = (carte) => {
+    const { id, ...rest } = carte;
+    setForm(rest);
+    setEditingId(id);
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setForm(EMPTY);
+  };
+
+  const saveCarte = async (e) => {
     e.preventDefault();
+    const payload = {
+      ...form,
+      numarExemplare: Number(form.numarExemplare) || 1,
+      anPublicare:    Number(form.anPublicare)    || 0,
+    };
     try {
-      await addDoc(collection(db, 'carti'), {
-        ...form,
-        numarExemplare: Number(form.numarExemplare) || 1,
-        anPublicare:    Number(form.anPublicare)    || 0,
-        dataAdaugare:   Timestamp.now(),
-      });
-      setForm(EMPTY);
-      setShowForm(false);
+      if (editingId) {
+        await updateDoc(doc(db, 'carti', editingId), payload);
+      } else {
+        await addDoc(collection(db, 'carti'), { ...payload, dataAdaugare: Timestamp.now() });
+      }
+      closeForm();
       loadCarti();
     } catch (e) { alert('Eroare salvare: ' + e.message); }
   };
 
   const deleteCarte = async (id) => {
     if (!confirm('Stergi aceasta carte din catalog?')) return;
-    await deleteDoc(doc(db, 'carti', id));
-    loadCarti();
+    try {
+      await deleteDoc(doc(db, 'carti', id));
+      loadCarti();
+    } catch (e) { alert('Eroare la stergere: ' + e.message); }
   };
 
   const filtered = carti.filter(c =>
@@ -223,7 +296,7 @@ export default function CartiPage() {
           <button className="btn btn-secondary" onClick={() => setShowScanner(true)}>
             &#128247; Scaneaza ISBN
           </button>
-          <button className="btn btn-primary" onClick={() => { setForm(EMPTY); setShowForm(true); }}>
+          <button className="btn btn-primary" onClick={() => { setForm(EMPTY); setEditingId(null); setShowForm(true); }}>
             + Adauga Manual
           </button>
         </div>
@@ -242,31 +315,45 @@ export default function CartiPage() {
             <thead>
               <tr>
                 <th>#</th><th>Titlu</th><th>Autor</th><th>ISBN</th>
-                <th>Gen</th><th>An</th><th>Exemplare</th><th>Actiuni</th>
+                <th>Gen</th><th>An</th><th>Disponibile</th><th>Actiuni</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0
                 ? <tr><td colSpan="8" className="empty-row">Nicio carte gasita</td></tr>
-                : filtered.map((c, i) => (
-                  <tr key={c.id}>
-                    <td>{i + 1}</td>
-                    <td><strong>{c.titlu}</strong></td>
-                    <td>{c.autor}</td>
-                    <td>
-                      <span style={{ fontFamily: 'monospace', fontSize: '.78rem', color: 'var(--g600)' }}>
-                        {c.isbn || '—'}
-                      </span>
-                    </td>
-                    <td>{c.gen ? <span className="badge badge-blue">{c.gen}</span> : '—'}</td>
-                    <td>{c.anPublicare || '—'}</td>
-                    <td><span className="badge badge-green">{c.numarExemplare}</span></td>
-                    <td>
-                      <button className="btn-icon" title="Sterge"
-                        onClick={() => deleteCarte(c.id)}>&#128465;</button>
-                    </td>
-                  </tr>
-                ))}
+                : filtered.map((c, i) => {
+                  const total  = c.numarExemplare || 1;
+                  const imprum = activeLoansMap[c.id] || 0;
+                  const avail  = total - imprum;
+                  return (
+                    <tr key={c.id}>
+                      <td>{i + 1}</td>
+                      <td><strong>{c.titlu}</strong></td>
+                      <td>{c.autor}</td>
+                      <td>
+                        <span style={{ fontFamily: 'monospace', fontSize: '.78rem', color: 'var(--g600)' }}>
+                          {c.isbn || '—'}
+                        </span>
+                      </td>
+                      <td>{c.gen ? <span className="badge badge-blue">{c.gen}</span> : '—'}</td>
+                      <td>{c.anPublicare || '—'}</td>
+                      <td>
+                        <span
+                          className={`badge ${avail === 0 ? 'badge-red' : avail <= Math.ceil(total / 2) ? 'badge-yellow' : 'badge-green'}`}
+                          title={`${imprum} imprumutate din ${total}`}
+                        >
+                          {avail === 0 ? '✗ Nicio' : avail} {avail !== 0 && 'din'} {avail !== 0 && total}
+                        </span>
+                      </td>
+                      <td>
+                        <button className="btn-icon" title="Editeaza"
+                          onClick={() => openEdit(c)}>&#9998;</button>
+                        <button className="btn-icon" title="Sterge"
+                          onClick={() => deleteCarte(c.id)}>&#128465;</button>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
@@ -282,16 +369,16 @@ export default function CartiPage() {
 
       {/* ── Add / Edit Form Modal ── */}
       {showForm && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowForm(false)}>
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && closeForm()}>
           <div className="modal">
             <div className="modal-header">
               <h3>
-                {form.isbn ? `Carte detectata – ISBN ${form.isbn}` : 'Adauga Carte Noua'}
+                {editingId ? `Editeaza Carte` : form.isbn ? `Carte detectata – ISBN ${form.isbn}` : 'Adauga Carte Noua'}
               </h3>
-              <button className="modal-close" onClick={() => setShowForm(false)}>&#10005;</button>
+              <button className="modal-close" onClick={closeForm}>&#10005;</button>
             </div>
 
-            <form className="form" onSubmit={addCarte}>
+            <form className="form" onSubmit={saveCarte}>
               <div className="form-group">
                 <label>ISBN</label>
                 <div className="isbn-row">
@@ -313,7 +400,7 @@ export default function CartiPage() {
 
               {isbnLoading && (
                 <div className="alert alert-info">
-                  &#128269; Se cauta informatii pe OpenLibrary...
+                  &#128269; Se cauta informatii despre carte...
                 </div>
               )}
 
@@ -371,9 +458,9 @@ export default function CartiPage() {
 
               <div className="form-actions">
                 <button type="button" className="btn btn-secondary"
-                  onClick={() => setShowForm(false)}>Anuleaza</button>
+                  onClick={closeForm}>Anuleaza</button>
                 <button type="submit" className="btn btn-primary">
-                  &#128190; Salveaza Cartea
+                  &#128190; {editingId ? 'Salveaza Modificarile' : 'Salveaza Cartea'}
                 </button>
               </div>
             </form>

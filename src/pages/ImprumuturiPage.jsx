@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   collection, addDoc, getDocs, updateDoc,
   doc, query, orderBy, Timestamp, where
@@ -29,6 +29,102 @@ const isOverdue = (imp) =>
 const toInputDate = (d = new Date()) => d.toISOString().split('T')[0];
 
 const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+
+/* ════════════════════════════════════════════════
+   SearchSelect – combobox elegant cu suport scanner
+   ════════════════════════════════════════════════ */
+function SearchSelect({ items, value, onChange, placeholder, filterFn, renderItem, renderChip, scanHint }) {
+  const [q,    setQ]    = useState('');
+  const [open, setOpen] = useState(false);
+  const [hi,   setHi]   = useState(0);
+  const inputRef = useRef();
+  const boxRef   = useRef();
+
+  const selected = value ? items.find(it => it.id === value) : null;
+  const list = q.trim() ? items.filter(it => filterFn(it, q)) : items;
+
+  useEffect(() => {
+    const fn = e => { if (!boxRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', fn);
+    return () => document.removeEventListener('mousedown', fn);
+  }, []);
+
+  const pick = (item) => { onChange(item.id); setQ(''); setOpen(false); setHi(0); };
+  const clear = () => { onChange(''); setQ(''); setHi(0); setTimeout(() => inputRef.current?.focus(), 0); };
+
+  const handleKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHi(h => Math.min(h + 1, list.length - 1)); return; }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); setHi(h => Math.max(h - 1, 0)); return; }
+    if (e.key === 'Escape')    { setOpen(false); setQ(''); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // daca e un item evidentiat, selecteaza-l
+      if (open && list[hi]) { pick(list[hi]); return; }
+      // Zebra scanner / ISBN: cauta potrivire exacta la ISBN
+      const raw = q.replace(/[-\s]/g, '');
+      if (raw) {
+        const exact = items.find(it => it.isbn && it.isbn.replace(/[-\s]/g, '') === raw);
+        if (exact) { pick(exact); return; }
+      }
+      // daca e un singur rezultat, selecteaza-l automat
+      if (list.length === 1) { pick(list[0]); return; }
+      setOpen(true);
+    }
+  };
+
+  return (
+    <div className="ss-wrap" ref={boxRef}>
+      {selected ? (
+        <div className="ss-chip">
+          <div className="ss-chip-body">{renderChip(selected)}</div>
+          <button type="button" className="ss-chip-clear" onClick={clear} title="Schimba selectia">✕</button>
+        </div>
+      ) : (
+        <>
+          <div className="ss-input-row">
+            <span className="ss-ico">🔍</span>
+            <input
+              ref={inputRef}
+              className="ss-input"
+              value={q}
+              placeholder={placeholder}
+              onChange={e => { setQ(e.target.value); setHi(0); setOpen(true); }}
+              onFocus={() => setOpen(true)}
+              onKeyDown={handleKey}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {q && (
+              <button type="button" className="ss-ico-clear"
+                onClick={() => { setQ(''); setHi(0); inputRef.current?.focus(); }}>
+                ×
+              </button>
+            )}
+          </div>
+          {open && (
+            <div className="ss-dropdown">
+              {list.length === 0 ? (
+                <div className="ss-empty">Niciun rezultat pentru „{q}"</div>
+              ) : (
+                list.slice(0, 80).map((item, i) => (
+                  <div
+                    key={item.id}
+                    className={`ss-item${i === hi ? ' ss-hi' : ''}`}
+                    onMouseDown={() => pick(item)}
+                    onMouseEnter={() => setHi(i)}
+                  >
+                    {renderItem(item)}
+                  </div>
+                ))
+              )}
+              {scanHint && <div className="ss-scan-tip">💡 {scanHint}</div>}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function ImprumuturiPage() {
   const [imprumuturi, setImprumuturi] = useState([]);
@@ -76,6 +172,22 @@ export default function ImprumuturiPage() {
   const availableCarti = carti.filter(c =>
     (c.numarExemplare || 1) > (activeLoansPerBook[c.id] || 0)
   );
+  const unavailableCarti = carti.filter(c =>
+    (c.numarExemplare || 1) <= (activeLoansPerBook[c.id] || 0)
+  );
+
+  const selectedCarte = carti.find(c => c.id === form.carteId);
+  const selectedAvail = selectedCarte
+    ? (selectedCarte.numarExemplare || 1) - (activeLoansPerBook[selectedCarte.id] || 0)
+    : null;
+
+  // carti sortate: disponibile intai, apoi dupa titlu
+  const cartiSorted = useMemo(() => [...carti].sort((a, b) => {
+    const aAvail = (a.numarExemplare || 1) - (activeLoansPerBook[a.id] || 0);
+    const bAvail = (b.numarExemplare || 1) - (activeLoansPerBook[b.id] || 0);
+    if ((aAvail > 0) !== (bAvail > 0)) return aAvail > 0 ? -1 : 1;
+    return (a.titlu || '').localeCompare(b.titlu || '', 'ro');
+  }), [carti, activeLoansPerBook]);
 
   /* ─── Add imprumut ─── */
   const addImprumut = async (e) => {
@@ -276,32 +388,95 @@ export default function ImprumuturiPage() {
             <form className="form" onSubmit={addImprumut}>
               <div className="form-group">
                 <label>Elev *</label>
-                <select required value={form.elevId}
-                  onChange={e => setForm({ ...form, elevId: e.target.value })}>
-                  <option value="">-- Selecteaza elev --</option>
-                  {elevi.map(el => (
-                    <option key={el.id} value={el.id}>
-                      {el.nume} {el.prenume} – {el.clasa}
-                    </option>
-                  ))}
-                </select>
+                <SearchSelect
+                  items={elevi}
+                  value={form.elevId}
+                  onChange={id => setForm(f => ({ ...f, elevId: id }))}
+                  placeholder="Cauta dupa nume, prenume sau clasa..."
+                  filterFn={(el, q) => `${el.nume} ${el.prenume} ${el.clasa} ${el.cnp || ''}`.toLowerCase().includes(q.toLowerCase())}
+                  renderItem={el => (
+                    <>
+                      <div className="ss-item-title">
+                        <span>{el.nume} {el.prenume}</span>
+                        <span className="badge badge-blue">{el.clasa}</span>
+                      </div>
+                      {el.cnp && <div className="ss-item-sub">CNP: {el.cnp}</div>}
+                    </>
+                  )}
+                  renderChip={el => (
+                    <>
+                      <span className="ss-chip-label">{el.nume} {el.prenume}</span>
+                      <span className="badge badge-blue">{el.clasa}</span>
+                    </>
+                  )}
+                />
               </div>
 
               <div className="form-group">
-                <label>Carte *  ({availableCarti.length} disponibile)</label>
-                <select required value={form.carteId}
-                  onChange={e => setForm({ ...form, carteId: e.target.value })}>
-                  <option value="">-- Selecteaza carte --</option>
-                  {availableCarti.map(c => {
+                <label>Carte * — {availableCarti.length} din {carti.length} disponibile</label>
+                <SearchSelect
+                  items={cartiSorted}
+                  value={form.carteId}
+                  onChange={id => setForm(f => ({ ...f, carteId: id }))}
+                  placeholder="Cauta dupa titlu, autor sau ISBN..."
+                  filterFn={(c, q) => `${c.titlu} ${c.autor} ${c.isbn || ''} ${c.gen || ''}`.toLowerCase().includes(q.toLowerCase())}
+                  renderItem={c => {
+                    const avail = (c.numarExemplare || 1) - (activeLoansPerBook[c.id] || 0);
+                    const unavail = avail <= 0;
+                    return (
+                      <div className={unavail ? 'ss-item-unavail' : ''}>
+                        <div className="ss-item-title">
+                          <span>{c.titlu}</span>
+                          <span className={`badge ${unavail ? 'badge-red' : avail <= Math.ceil((c.numarExemplare || 1) / 2) ? 'badge-yellow' : 'badge-green'}`}>
+                            {unavail ? '✗ indisponibil' : `${avail} disp.`}
+                          </span>
+                        </div>
+                        <div className="ss-item-sub">
+                          {c.autor}{c.isbn ? ` · ISBN ${c.isbn}` : ''}
+                        </div>
+                      </div>
+                    );
+                  }}
+                  renderChip={c => {
                     const avail = (c.numarExemplare || 1) - (activeLoansPerBook[c.id] || 0);
                     return (
-                      <option key={c.id} value={c.id}>
-                        {c.titlu} – {c.autor} [{avail} ex. disp.]
-                      </option>
+                      <>
+                        <span className="ss-chip-label">{c.titlu}</span>
+                        <span className="ss-chip-sub">{c.autor}</span>
+                        <span className={`badge ${avail <= 0 ? 'badge-red' : 'badge-green'}`}>
+                          {avail} disp.
+                        </span>
+                      </>
                     );
-                  })}
-                </select>
+                  }}
+                  scanHint="Scaneaza codul de bare ISBN cu Zebra LS2208 si apasa Enter"
+                />
               </div>
+
+              {selectedAvail !== null && selectedAvail <= 0 && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
+                  border: '2px solid #fca5a5',
+                  borderRadius: '12px',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  animation: 'slideDown .25s ease',
+                }}>
+                  <span style={{ fontSize: '2rem', lineHeight: 1 }}>📚</span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '1rem', marginBottom: '4px' }}>
+                      Niciun exemplar disponibil!
+                    </div>
+                    <div style={{ color: '#7f1d1d', fontSize: '.875rem' }}>
+                      Toate cele <strong>{selectedCarte.numarExemplare || 1}</strong> exemplare din{' '}
+                      <em>„{selectedCarte.titlu}"</em> sunt momentan imprumutate.
+                      Alege alta carte sau asteapta returnarea.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="form-row">
                 <div className="form-group">
@@ -327,7 +502,10 @@ export default function ImprumuturiPage() {
                 <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
                   Anuleaza
                 </button>
-                <button type="submit" className="btn btn-primary">Inregistreaza</button>
+                <button type="submit" className="btn btn-primary"
+                  disabled={!form.elevId || !form.carteId || (selectedAvail !== null && selectedAvail <= 0)}>
+                  Inregistreaza
+                </button>
               </div>
             </form>
           </div>
