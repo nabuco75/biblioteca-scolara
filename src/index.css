@@ -1326,3 +1326,199 @@ body {
   .footer-sep { display: none; }
   .footer-content { flex-direction: column; gap: .25rem; text-align: center; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   REGISTRU INVENTAR
+   ═══════════════════════════════════════════════════════════ */
+
+/* Banner oficial */
+.registru-banner {
+  background: linear-gradient(135deg, var(--g700) 0%, var(--g600) 60%, var(--g500) 100%);
+  border-radius: 14px;
+  padding: 1.5rem 2rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 20px rgba(14, 82, 54, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+.registru-banner::before {
+  content: '';
+  position: absolute;
+  top: -40px; right: -40px;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: rgba(212, 151, 42, 0.12);
+}
+.registru-banner::after {
+  content: '';
+  position: absolute;
+  bottom: -30px; left: 40%;
+  width: 100px; height: 100px;
+  border-radius: 50%;
+  background: rgba(255,255,255, 0.05);
+}
+.registru-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  position: relative;
+  z-index: 1;
+}
+.registru-banner-icon {
+  font-size: 2.8rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+}
+.registru-banner-school {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--gold-200);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.2rem;
+}
+.registru-banner-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.registru-banner-sub {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(174, 228, 205, 0.85);
+  margin-top: 0.3rem;
+}
+
+/* Wrap tabel cu scroll orizontal */
+.registru-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1.5px solid var(--n200);
+  box-shadow: 0 2px 16px rgba(14, 82, 54, 0.08);
+  background: #fff;
+}
+
+/* Tabel principal */
+.registru-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  min-width: 1100px;
+}
+
+/* Header tabel */
+.registru-table thead tr {
+  background: linear-gradient(90deg, var(--g700) 0%, var(--g600) 100%);
+}
+.registru-table thead th {
+  padding: 0.7rem 0.6rem;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-align: center;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-right: 1px solid rgba(255,255,255,0.15);
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.registru-table thead th:last-child { border-right: none; }
+
+/* Coloane dimensiuni */
+.registru-table .col-nr    { width: 44px;  }
+.registru-table .col-data  { width: 85px;  }
+.registru-table .col-nrinv { width: 80px;  }
+.registru-table .col-autor { width: 150px; }
+.registru-table .col-titlu { width: 200px; }
+.registru-table .col-editia{ width: 75px;  }
+.registru-table .col-locul { width: 85px;  }
+.registru-table .col-editura{ width: 110px;}
+.registru-table .col-anul  { width: 55px;  }
+.registru-table .col-pret  { width: 75px;  }
+.registru-table .col-obs   { min-width: 130px; }
+
+/* Body tabel */
+.registru-table tbody td {
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--n100);
+  border-right: 1px solid var(--n100);
+  color: var(--n800);
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.registru-table tbody td:last-child { border-right: none; }
+
+/* Alternare randuri */
+.registru-table .row-even { background: #fff; }
+.registru-table .row-odd  { background: var(--g50); }
+.registru-table tbody tr:hover { background: var(--gold-100) !important; transition: background 0.15s; }
+
+/* Celule speciale */
+.registru-table .cell-center { text-align: center; }
+.registru-table .cell-bold   { font-weight: 700; color: var(--g700); }
+.registru-table .cell-titlu  { font-weight: 600; color: var(--n900); }
+.registru-table .cell-obs    { font-size: 0.75rem; color: var(--n500); font-style: italic; max-width: 160px; }
+
+/* Footer tabel */
+.registru-table tfoot .registru-footer-row {
+  padding: 0.6rem 1rem;
+  background: var(--n50);
+  color: var(--n600);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-top: 2px solid var(--n200);
+  text-align: right;
+}
+.registru-table tfoot .registru-footer-row strong {
+  color: var(--g700);
+  font-weight: 800;
+}
+
+/* ─── Print ─── */
+@media print {
+  .no-print,
+  .app-header,
+  .app-nav,
+  .app-footer,
+  .page-header .btn,
+  .search-bar {
+    display: none !important;
+  }
+  .registru-page {
+    padding: 0 !important;
+  }
+  .registru-banner {
+    background: #fff !important;
+    box-shadow: none !important;
+    border: 2px solid #000;
+    border-radius: 0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .registru-banner-title { color: #000 !important; }
+  .registru-banner-school { color: #333 !important; }
+  .registru-banner-sub { color: #555 !important; }
+  .registru-table-wrap {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+  .registru-table { min-width: unset !important; font-size: 8pt !important; }
+  .registru-table thead th { font-size: 7.5pt !important; }
+  .registru-table tbody td { padding: 3pt 4pt !important; font-size: 8pt !important; }
+  .registru-table thead tr {
+    background: #1a4d33 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .registru-table .row-odd {
+    background: #f0faf5 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

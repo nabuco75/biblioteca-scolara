@@ -1,128 +1,69 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   collection, addDoc, updateDoc, getDocs, deleteDoc,
   doc, query, orderBy, where, Timestamp
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { BrowserMultiFormatReader, BrowserCodeReader } from '@zxing/browser';
 
 const EMPTY = {
   titlu: '', autor: '', isbn: '', nrInregistrare: '', editura: '',
   anPublicare: '', numarExemplare: 1, gen: '', descriere: '',
+  editia: '', locul: '', nrVolum: '',
 };
 
 /* ════════════════════════════════════════════════
-   Scanner Modal
+   Scanner Modal – Cititor USB (Zebra / HID)
    ════════════════════════════════════════════════ */
 function ScannerModal({ onScan, onClose }) {
-  const videoRef    = useRef(null);
-  const readerRef   = useRef(null);
-  const doneRef     = useRef(false);           // prevent double-fire
-  const [status,    setStatus]  = useState('Se initializeaza camera...');
-  const [cameras,   setCameras] = useState([]);
-  const [activeId,  setActiveId] = useState(null);
-
-  const startCamera = useCallback(async (deviceId) => {
-    // stop previous stream
-    if (readerRef.current) {
-      try { readerRef.current.stop(); } catch { /* noop */ }
-    }
-    doneRef.current = false;
-    setStatus('Scanare activa – apropie codul de bare...');
-
-    try {
-      readerRef.current = await new BrowserMultiFormatReader().decodeFromVideoDevice(
-        deviceId ?? undefined,
-        videoRef.current,
-        (result, _err, controls) => {
-          if (result && !doneRef.current) {
-            doneRef.current = true;
-            controls.stop();
-            onScan(result.getText());
-          }
-        }
-      );
-    } catch (e) {
-      const msg = e?.message ?? String(e);
-      if (msg.includes('Permission') || msg.includes('permission') || msg.includes('NotAllowed')) {
-        setStatus('Acces camera refuzat. Permite accesul la camera in browser si incearca din nou.');
-      } else if (msg.includes('NotFound') || msg.includes('device')) {
-        setStatus('Nu s-a gasit nicio camera. Verifica ca dispozitivul are camera.');
-      } else {
-        setStatus('Eroare camera: ' + msg);
-      }
-    }
-  }, [onScan]);
+  const [isbn, setIsbn] = useState('');
+  const inputRef = useRef(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        // enumerate cameras (needs getUserMedia permission first on some browsers)
-        await navigator.mediaDevices.getUserMedia({ video: true });
-        const devs = await BrowserCodeReader.listVideoInputDevices();
-        setCameras(devs);
+    // mic delay ca modalul sa fie randat inainte de focus
+    const t = setTimeout(() => inputRef.current?.focus(), 80);
+    return () => clearTimeout(t);
+  }, []);
 
-        // prefer rear / environment camera
-        const rear = devs.find(d => /back|rear|environment|2/i.test(d.label));
-        const chosen = rear?.deviceId ?? devs[0]?.deviceId ?? null;
-        setActiveId(chosen);
-        await startCamera(chosen);
-      } catch (e) {
-        setStatus('Nu s-a putut accesa camera: ' + (e?.message ?? e));
-      }
-    })();
-
-    return () => {
-      try { readerRef.current?.stop(); } catch { /* noop */ }
-    };
-  }, [startCamera]);
-
-  const switchCamera = async (deviceId) => {
-    setActiveId(deviceId);
-    await startCamera(deviceId);
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && isbn.trim()) {
+      onScan(isbn.trim());
+    }
   };
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal scanner-modal">
+      <div className="modal" style={{ maxWidth: 420 }}>
         <div className="modal-header">
-          <h3>&#128247; Scanare Cod de Bare ISBN</h3>
+          <h3>&#128269; Cititor Cod de Bare ISBN</h3>
           <button className="modal-close" onClick={onClose}>&#10005;</button>
         </div>
 
-        <div className="scanner-body">
-          <div className="scanner-viewport">
-            <video ref={videoRef} autoPlay playsInline muted className="scanner-video" />
-            {/* Viewfinder overlay */}
-            <div className="scanner-overlay">
-              <div className="scanner-frame">
-                <span className="corner tl" /><span className="corner tr" />
-                <span className="corner bl" /><span className="corner br" />
-                <div className="scanner-beam" />
-              </div>
-            </div>
-          </div>
-
-          <p className="scanner-status">{status}</p>
-
-          {cameras.length > 1 && (
-            <div className="scanner-cameras">
-              <span className="scanner-label">Camera:</span>
-              {cameras.map((cam, i) => (
-                <button
-                  key={cam.deviceId}
-                  className={`btn btn-sm ${activeId === cam.deviceId ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => switchCamera(cam.deviceId)}
-                >
-                  {cam.label || `Camera ${i + 1}`}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <p className="scanner-hint">
-            Tine cartea astfel incat codul de bare sa fie vizibil si bine iluminat.
-            Scanarea este automata.
+        <div style={{ padding: '2rem', textAlign: 'center' }}>
+          <div style={{ fontSize: '3.5rem', marginBottom: '1rem' }}>&#128222;</div>
+          <p style={{ marginBottom: '0.5rem', fontWeight: 600 }}>
+            Indreapta cititorul Zebra spre codul de bare
+          </p>
+          <p style={{ marginBottom: '1.5rem', fontSize: '0.875rem', color: 'var(--g500, #6b7280)' }}>
+            Apasa tragaciul — ISBN-ul va aparea automat in campul de mai jos si va fi cautat imediat.
+          </p>
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            placeholder="ISBN apare aici dupa scanare..."
+            value={isbn}
+            onChange={e => setIsbn(e.target.value)}
+            onKeyDown={handleKeyDown}
+            style={{
+              width: '100%', padding: '0.75rem 1rem',
+              fontSize: '1.1rem', textAlign: 'center',
+              letterSpacing: '0.12em', borderRadius: '8px',
+              border: '2px solid var(--primary, #2563eb)',
+              outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+          <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--g400, #9ca3af)' }}>
+            Sau tasteaza ISBN manual si apasa Enter
           </p>
         </div>
       </div>
@@ -143,6 +84,7 @@ export default function CartiPage() {
   const [isbnLoading, setIsbnLoading] = useState(false);
   const [form,        setForm]       = useState(EMPTY);
   const [editingId,   setEditingId]  = useState(null); // null = adaugare, string = editare
+  const [editNr,      setEditNr]     = useState(null); // { id, value } pentru editare rapida nr. inventar
 
   useEffect(() => { loadCarti(); }, []);
 
@@ -294,7 +236,7 @@ export default function CartiPage() {
         <h2>📚 Catalog Cărți</h2>
         <div className="page-actions">
           <button className="btn btn-secondary" onClick={() => setShowScanner(true)}>
-            &#128247; Scaneaza ISBN
+            &#128269; Scaneaza ISBN
           </button>
           <button className="btn btn-primary" onClick={() => { setForm(EMPTY); setEditingId(null); setShowForm(true); }}>
             + Adauga Manual
@@ -328,8 +270,25 @@ export default function CartiPage() {
                   return (
                     <tr key={c.id}>
                       <td>{i + 1}</td>
-                      <td>{c.nrInregistrare || '—'}</td>
-                      <td><strong>{c.titlu}</strong></td>
+                      <td>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                          {c.nrInregistrare || '—'}
+                          <button
+                            className="btn-icon"
+                            title="Editeaza nr. inventar"
+                            style={{ fontSize: '0.75rem', padding: '0 0.25rem', opacity: 0.6 }}
+                            onClick={() => setEditNr({ id: c.id, value: c.nrInregistrare || '' })}
+                          >&#9998;</button>
+                        </span>
+                      </td>
+                      <td>
+                        <strong>{c.titlu}</strong>
+                        {c.nrVolum && (
+                          <span style={{ marginLeft: '0.4rem', fontSize: '0.75rem', color: 'var(--g500, #6b7280)', fontWeight: 400 }}>
+                            vol. {c.nrVolum}
+                          </span>
+                        )}
+                      </td>
                       <td>{c.autor}</td>
                       <td>
                         <span style={{ fontFamily: 'monospace', fontSize: '.78rem', color: 'var(--g600)' }}>
@@ -357,6 +316,43 @@ export default function CartiPage() {
                 })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ── Quick Edit Nr. Inventar ── */}
+      {editNr && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setEditNr(null)}>
+          <div className="modal" style={{ maxWidth: 360 }}>
+            <div className="modal-header">
+              <h3>&#9998; Nr. Inventar</h3>
+              <button className="modal-close" onClick={() => setEditNr(null)}>&#10005;</button>
+            </div>
+            <div style={{ padding: '1.5rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.9rem' }}>
+                Nr. Înregistrare / Inventar
+              </label>
+              <input
+                autoFocus
+                style={{ width: '100%', padding: '0.6rem 0.8rem', fontSize: '1rem', borderRadius: 8, border: '2px solid var(--primary, #2563eb)', outline: 'none', boxSizing: 'border-box' }}
+                value={editNr.value}
+                onChange={e => setEditNr(en => ({ ...en, value: e.target.value }))}
+                onKeyDown={async e => {
+                  if (e.key === 'Enter') {
+                    await updateDoc(doc(db, 'carti', editNr.id), { nrInregistrare: editNr.value });
+                    setEditNr(null); loadCarti();
+                  }
+                  if (e.key === 'Escape') setEditNr(null);
+                }}
+              />
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
+                <button className="btn btn-secondary" onClick={() => setEditNr(null)}>Anulează</button>
+                <button className="btn btn-primary" onClick={async () => {
+                  await updateDoc(doc(db, 'carti', editNr.id), { nrInregistrare: editNr.value });
+                  setEditNr(null); loadCarti();
+                }}>&#128190; Salvează</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -392,9 +388,9 @@ export default function CartiPage() {
                     {isbnLoading ? '&#9203; Cauta...' : '&#128269; Cauta'}
                   </button>
                   <button type="button" className="btn btn-secondary"
-                    title="Deschide scanner"
+                    title="Cititor cod de bare USB"
                     onClick={() => { setShowForm(false); setShowScanner(true); }}>
-                    &#128247;
+                    &#128269;
                   </button>
                 </div>
               </div>
@@ -454,6 +450,27 @@ export default function CartiPage() {
                   <input type="number" min="1" required
                     value={form.numarExemplare}
                     onChange={e => setForm({ ...form, numarExemplare: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Ediția</label>
+                  <input placeholder="ex: Ed. a II-a"
+                    value={form.editia}
+                    onChange={e => setForm({ ...form, editia: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Nr. Volum</label>
+                  <input type="number" min="1" placeholder="ex: 1, 2, 3..."
+                    value={form.nrVolum}
+                    onChange={e => setForm({ ...form, nrVolum: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Locul</label>
+                  <input placeholder="ex: București"
+                    value={form.locul}
+                    onChange={e => setForm({ ...form, locul: e.target.value })} />
                 </div>
               </div>
 

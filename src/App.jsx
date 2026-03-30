@@ -3,13 +3,15 @@ import EleviPage from './pages/EleviPage';
 import CartiPage from './pages/CartiPage';
 import ImprumuturiPage from './pages/ImprumuturiPage';
 import RapoartePage from './pages/RapoartePage';
+import RegistruInventarPage from './pages/RegistruInventarPage';
 import AuthModal, { useAuth } from './components/AuthModal';
 
 const TABS = [
-  { id: 'elevi',        label: 'Elevi',          icon: '👥' },
-  { id: 'carti',        label: 'Catalog Cărți',  icon: '📚' },
-  { id: 'imprumuturi',  label: 'Împrumuturi',    icon: '📖' },
-  { id: 'rapoarte',     label: 'Rapoarte',        icon: '📊' },
+  { id: 'elevi',             label: 'Elevi',             icon: '👥' },
+  { id: 'carti',             label: 'Catalog Cărți',     icon: '📚' },
+  { id: 'imprumuturi',       label: 'Împrumuturi',       icon: '📖' },
+  { id: 'rapoarte',          label: 'Rapoarte',          icon: '📊' },
+  { id: 'registru-inventar', label: 'Registru Inventar', icon: '📋' },
 ];
 
 export default function App() {
@@ -51,10 +53,11 @@ export default function App() {
       </nav>
 
       <main className="app-main">
-        {activeTab === 'elevi'       && <EleviPage />}
-        {activeTab === 'carti'       && <CartiPage />}
-        {activeTab === 'imprumuturi' && <ImprumuturiPage />}
-        {activeTab === 'rapoarte'    && <RapoartePage />}
+        {activeTab === 'elevi'             && <EleviPage />}
+        {activeTab === 'carti'             && <CartiPage />}
+        {activeTab === 'imprumuturi'       && <ImprumuturiPage />}
+        {activeTab === 'rapoarte'          && <RapoartePage />}
+        {activeTab === 'registru-inventar' && <RegistruInventarPage />}
       </main>
 
       <footer className="app-footer">
