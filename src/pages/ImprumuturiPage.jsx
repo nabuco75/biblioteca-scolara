@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   collection, addDoc, getDocs, updateDoc,
-  doc, query, orderBy, Timestamp, where
+  doc, query, orderBy, Timestamp, where,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
-/* helpers */
+/* ─── helpers ─── */
 const norm = s => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 const fmtDate = (ts) => {
@@ -19,15 +19,10 @@ const toDate = (ts) => {
   return ts.toDate ? ts.toDate() : new Date(ts);
 };
 
-const daysDiff = (ts) => {
-  const d = toDate(ts);
-  return Math.floor((Date.now() - d.getTime()) / 86_400_000);
-};
+const daysDiff = (ts) => Math.floor((Date.now() - toDate(ts).getTime()) / 86_400_000);
 
-const isOverdue = (imp) =>
-  imp.stare === 'activ' && daysDiff(imp.dataImprumut) > 14;
+const isOverdue = (imp) => imp.stare === 'activ' && daysDiff(imp.dataImprumut) > 14;
 
-/* returns date string YYYY-MM-DD for <input type="date"> */
 const toInputDate = (d = new Date()) => d.toISOString().split('T')[0];
 
 const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
@@ -60,15 +55,12 @@ function SearchSelect({ items, value, onChange, placeholder, filterFn, renderIte
     if (e.key === 'Escape')    { setOpen(false); setQ(''); return; }
     if (e.key === 'Enter') {
       e.preventDefault();
-      // daca e un item evidentiat, selecteaza-l
       if (open && list[hi]) { pick(list[hi]); return; }
-      // Zebra scanner / ISBN: cauta potrivire exacta la ISBN
       const raw = q.replace(/[-\s]/g, '');
       if (raw) {
         const exact = items.find(it => it.isbn && it.isbn.replace(/[-\s]/g, '') === raw);
         if (exact) { pick(exact); return; }
       }
-      // daca e un singur rezultat, selecteaza-l automat
       if (list.length === 1) { pick(list[0]); return; }
       setOpen(true);
     }
@@ -128,19 +120,24 @@ function SearchSelect({ items, value, onChange, placeholder, filterFn, renderIte
   );
 }
 
+/* ════════════════════════════════════════════════
+   Main Page
+   ════════════════════════════════════════════════ */
 export default function ImprumuturiPage() {
   const [imprumuturi, setImprumuturi] = useState([]);
   const [elevi,       setElevi]       = useState([]);
-  const [carti,       setCarti]       = useState([]);
+  const [carti,       setCarti]       = useState([]); // title-level books
+  const [copies,      setCopies]      = useState([]); // all copies
   const [loading,     setLoading]     = useState(true);
   const [showForm,    setShowForm]    = useState(false);
   const [filter,      setFilter]      = useState('active');
   const [search,      setSearch]      = useState('');
 
-  const today     = new Date();
+  const today = new Date();
   const [form, setForm] = useState({
     elevId:        '',
-    carteId:       '',
+    carteId:       '',  // book id (title level)
+    copyId:        '',  // specific copy
     dataImprumut:  toInputDate(today),
     dataReturnare: toInputDate(addDays(today, 14)),
   });
@@ -150,74 +147,91 @@ export default function ImprumuturiPage() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [impSnap, elevSnap, carteSnap] = await Promise.all([
+      const [impSnap, elevSnap, carteSnap, copiesSnap] = await Promise.all([
         getDocs(query(collection(db, 'imprumuturi'), orderBy('dataImprumut', 'desc'))),
         getDocs(query(collection(db, 'elevi'),       orderBy('nume'))),
         getDocs(query(collection(db, 'carti'),       orderBy('titlu'))),
+        getDocs(collection(db, 'copies')),
       ]);
       setImprumuturi(impSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setElevi(elevSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setCarti(carteSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setCopies(copiesSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
-  /* count active loans per book */
-  const activeLoansPerBook = useMemo(() => {
-    const map = {};
-    imprumuturi.forEach(imp => {
-      if (imp.stare === 'activ') map[imp.carteId] = (map[imp.carteId] || 0) + 1;
+  /* ─── Copies disponibile per book ─── */
+  const availableCopiesPerBook = useMemo(() => {
+    const map = {}; // bookId → copies disponibile[]
+    copies.forEach(c => {
+      if (c.status === 'disponibil') {
+        if (!map[c.bookId]) map[c.bookId] = [];
+        map[c.bookId].push(c);
+      }
     });
     return map;
-  }, [imprumuturi]);
+  }, [copies]);
 
-  const availableCarti = carti.filter(c =>
-    (c.numarExemplare || 1) > (activeLoansPerBook[c.id] || 0)
-  );
-  const unavailableCarti = carti.filter(c =>
-    (c.numarExemplare || 1) <= (activeLoansPerBook[c.id] || 0)
-  );
-
-  const selectedCarte = carti.find(c => c.id === form.carteId);
-  const selectedAvail = selectedCarte
-    ? (selectedCarte.numarExemplare || 1) - (activeLoansPerBook[selectedCarte.id] || 0)
-    : null;
-
-  // carti sortate: disponibile intai, apoi dupa titlu
+  /* ─── Books sortate: disponibile întâi ─── */
   const cartiSorted = useMemo(() => [...carti].sort((a, b) => {
-    const aAvail = (a.numarExemplare || 1) - (activeLoansPerBook[a.id] || 0);
-    const bAvail = (b.numarExemplare || 1) - (activeLoansPerBook[b.id] || 0);
+    const aAvail = (availableCopiesPerBook[a.id] || []).length;
+    const bAvail = (availableCopiesPerBook[b.id] || []).length;
     if ((aAvail > 0) !== (bAvail > 0)) return aAvail > 0 ? -1 : 1;
     return (a.titlu || '').localeCompare(b.titlu || '', 'ro');
-  }), [carti, activeLoansPerBook]);
+  }), [carti, availableCopiesPerBook]);
+
+  /* ─── Copii disponibile pentru cartea selectată ─── */
+  const selectedBook       = carti.find(c => c.id === form.carteId);
+  const availCopiesForBook = form.carteId ? (availableCopiesPerBook[form.carteId] || []) : [];
+
+  /* Auto-selecteaza copia dacă e singura disponibilă */
+  const handleBookSelect = (bookId) => {
+    const avail = bookId ? (availableCopiesPerBook[bookId] || []) : [];
+    setForm(f => ({
+      ...f,
+      carteId: bookId,
+      copyId:  avail.length === 1 ? avail[0].id : '',
+    }));
+  };
 
   /* ─── Add imprumut ─── */
   const addImprumut = async (e) => {
     e.preventDefault();
     const elev  = elevi.find(el => el.id === form.elevId);
-    const carte = carti.find(c  => c.id  === form.carteId);
+    const carte = carti.find(c => c.id === form.carteId);
     if (!elev || !carte) { alert('Selecteaza elev si carte valide.'); return; }
 
-    // check availability
-    const taken = activeLoansPerBook[carte.id] || 0;
-    if (taken >= (carte.numarExemplare || 1)) {
-      alert('Nu exista exemplare disponibile pentru aceasta carte!'); return;
-    }
+    const avail = availableCopiesPerBook[carte.id] || [];
+    if (avail.length === 0) { alert('Nu exista exemplare disponibile pentru aceasta carte!'); return; }
+
+    // Dacă nu s-a selectat o copie specifică, luăm prima disponibilă
+    const copyId = form.copyId || avail[0].id;
+    const copy   = copies.find(c => c.id === copyId);
+    if (!copy) { alert('Exemplarul selectat nu mai este disponibil.'); return; }
 
     try {
+      // 1. Creăm împrumutul
       await addDoc(collection(db, 'imprumuturi'), {
-        elevId:    elev.id,
-        elevNume:  elev.nume,
+        elevId:      elev.id,
+        elevNume:    elev.nume,
         elevPrenume: elev.prenume,
-        elevClasa: elev.clasa,
-        carteId:   carte.id,
-        carteTitlu: carte.titlu,
-        carteAutor: carte.autor,
+        elevClasa:   elev.clasa,
+        carteId:  carte.id,        // book id (titlu)
+        bookId:   carte.id,
+        copyId:   copyId,          // exemplar specific
+        carteTitlu:  carte.titlu,
+        carteAutor:  carte.autor,
+        nrInregistrare: copy.nrInregistrare || '',
         dataImprumut:  Timestamp.fromDate(new Date(form.dataImprumut)),
         dataReturnare: Timestamp.fromDate(new Date(form.dataReturnare)),
         dataReturnareEfectiva: null,
         stare: 'activ',
       });
+
+      // 2. Marcăm copia ca împrumutată
+      await updateDoc(doc(db, 'copies', copyId), { status: 'imprumutat' });
+
       setShowForm(false);
       resetForm();
       loadAll();
@@ -228,30 +242,37 @@ export default function ImprumuturiPage() {
   const returnCarte = async (imp) => {
     if (!confirm(`Marchezi returnarea cartii "${imp.carteTitlu}"?`)) return;
     try {
+      // Actualizează împrumutul
       await updateDoc(doc(db, 'imprumuturi', imp.id), {
         stare: 'returnat',
         dataReturnareEfectiva: Timestamp.now(),
       });
+
+      // Actualizează statusul copiei (dacă are copyId)
+      if (imp.copyId) {
+        await updateDoc(doc(db, 'copies', imp.copyId), { status: 'disponibil' });
+      }
+
       loadAll();
     } catch (e) { alert('Eroare: ' + e.message); }
   };
 
   const resetForm = () => {
     const d = new Date();
-    setForm({ elevId: '', carteId: '', dataImprumut: toInputDate(d), dataReturnare: toInputDate(addDays(d, 14)) });
+    setForm({ elevId: '', carteId: '', copyId: '', dataImprumut: toInputDate(d), dataReturnare: toInputDate(addDays(d, 14)) });
   };
 
   /* ─── Filtered list ─── */
   const displayed = imprumuturi
     .map(imp => ({ ...imp, overdueFlag: isOverdue(imp) }))
     .filter(imp => {
-      if (filter === 'active')    return imp.stare === 'activ' && !imp.overdueFlag;
+      if (filter === 'active')     return imp.stare === 'activ' && !imp.overdueFlag;
       if (filter === 'intarziate') return imp.overdueFlag;
       if (filter === 'returnate')  return imp.stare === 'returnat';
-      return true; // toate
+      return true;
     })
     .filter(imp =>
-      norm(`${imp.elevNume} ${imp.elevPrenume} ${imp.elevClasa} ${imp.carteTitlu}`)
+      norm(`${imp.elevNume} ${imp.elevPrenume} ${imp.elevClasa} ${imp.carteTitlu} ${imp.nrInregistrare || ''}`)
         .includes(norm(search))
     );
 
@@ -262,10 +283,13 @@ export default function ImprumuturiPage() {
     returnate:  imprumuturi.filter(i => i.stare === 'returnat').length,
   };
 
+  const totalDisponibile = copies.filter(c => c.status === 'disponibil').length;
+  const totalCopies      = copies.length;
+
   return (
     <div className="page">
       <div className="page-header">
-        <h2>📖 Gestiune Împrumuturi</h2>
+        <h2>&#128214; Gestiune Împrumuturi</h2>
         <button className="btn btn-primary btn-hero" onClick={() => { resetForm(); setShowForm(true); }}>
           + Inregistreaza Imprumut
         </button>
@@ -286,8 +310,8 @@ export default function ImprumuturiPage() {
           <div className="stat-label">Returnate</div>
         </div>
         <div className="stat-card yellow">
-          <div className="stat-value">{counts.toate}</div>
-          <div className="stat-label">Total</div>
+          <div className="stat-value">{totalDisponibile}</div>
+          <div className="stat-label">Exemplare disponibile{totalCopies ? ` (din ${totalCopies})` : ''}</div>
         </div>
       </div>
 
@@ -317,7 +341,7 @@ export default function ImprumuturiPage() {
 
       <div className="search-bar">
         <input className="search-input"
-          placeholder="Cauta dupa elev, clasa sau carte..."
+          placeholder="Cauta dupa elev, clasa, carte sau nr. inventar..."
           value={search} onChange={e => setSearch(e.target.value)} />
         <span className="search-count">{displayed.length} inregistrari</span>
       </div>
@@ -327,14 +351,15 @@ export default function ImprumuturiPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>#</th><th>Elev</th><th>Clasa</th><th>Carte</th>
+                <th>#</th><th>Elev</th><th>Clasa</th>
+                <th>Carte</th><th>Nr. Inv.</th>
                 <th>Data Imprumut</th><th>Termen</th><th>Zile</th>
                 <th>Stare</th><th>Actiuni</th>
               </tr>
             </thead>
             <tbody>
               {displayed.length === 0
-                ? <tr><td colSpan="9" className="empty-row">Nicio inregistrare gasita</td></tr>
+                ? <tr><td colSpan="10" className="empty-row">Nicio inregistrare gasita</td></tr>
                 : displayed.map((imp, i) => {
                   const zile = imp.stare === 'activ' ? daysDiff(imp.dataImprumut) : null;
                   return (
@@ -347,13 +372,16 @@ export default function ImprumuturiPage() {
                         <div>{imp.carteTitlu}</div>
                         <div style={{ fontSize: '.75rem', color: 'var(--g500)' }}>{imp.carteAutor}</div>
                       </td>
+                      <td>
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                          {imp.nrInregistrare || '—'}
+                        </span>
+                      </td>
                       <td>{fmtDate(imp.dataImprumut)}</td>
                       <td>{fmtDate(imp.dataReturnare)}</td>
                       <td>
                         {zile !== null
-                          ? <span style={{ color: zile > 14 ? 'var(--danger)' : 'var(--g700)', fontWeight: 600 }}>
-                              {zile}z
-                            </span>
+                          ? <span style={{ color: zile > 14 ? 'var(--danger)' : 'var(--g700)', fontWeight: 600 }}>{zile}z</span>
                           : <span style={{ color: 'var(--g400)' }}>—</span>}
                       </td>
                       <td>
@@ -379,7 +407,7 @@ export default function ImprumuturiPage() {
         </div>
       )}
 
-      {/* Add Modal */}
+      {/* ── Add Modal ── */}
       {showForm && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowForm(false)}>
           <div className="modal">
@@ -388,6 +416,8 @@ export default function ImprumuturiPage() {
               <button className="modal-close" onClick={() => setShowForm(false)}>&#10005;</button>
             </div>
             <form className="form" onSubmit={addImprumut}>
+
+              {/* ── Elev ── */}
               <div className="form-group">
                 <label>Elev *</label>
                 <SearchSelect
@@ -419,12 +449,15 @@ export default function ImprumuturiPage() {
                 />
               </div>
 
+              {/* ── Carte (titlu) ── */}
               <div className="form-group">
-                <label>Carte * — {availableCarti.length} din {carti.length} disponibile</label>
+                <label>
+                  Carte * — {carti.filter(c => (availableCopiesPerBook[c.id] || []).length > 0).length} din {carti.length} au exemplare disponibile
+                </label>
                 <SearchSelect
                   items={cartiSorted}
                   value={form.carteId}
-                  onChange={id => setForm(f => ({ ...f, carteId: id }))}
+                  onChange={handleBookSelect}
                   placeholder="Cauta dupa titlu, autor sau ISBN..."
                   filterFn={(c, q) => {
                     const nq = norm(q);
@@ -434,13 +467,14 @@ export default function ImprumuturiPage() {
                       || norm(c.gen).startsWith(nq);
                   }}
                   renderItem={c => {
-                    const avail = (c.numarExemplare || 1) - (activeLoansPerBook[c.id] || 0);
+                    const avail   = (availableCopiesPerBook[c.id] || []).length;
+                    const total   = copies.filter(cp => cp.bookId === c.id).length;
                     const unavail = avail <= 0;
                     return (
                       <div className={unavail ? 'ss-item-unavail' : ''}>
                         <div className="ss-item-title">
                           <span>{c.titlu}</span>
-                          <span className={`badge ${unavail ? 'badge-red' : avail <= Math.ceil((c.numarExemplare || 1) / 2) ? 'badge-yellow' : 'badge-green'}`}>
+                          <span className={`badge ${unavail ? 'badge-red' : avail <= Math.ceil(total / 2) ? 'badge-yellow' : 'badge-green'}`}>
                             {unavail ? '✗ indisponibil' : `${avail} disp.`}
                           </span>
                         </div>
@@ -451,7 +485,7 @@ export default function ImprumuturiPage() {
                     );
                   }}
                   renderChip={c => {
-                    const avail = (c.numarExemplare || 1) - (activeLoansPerBook[c.id] || 0);
+                    const avail = (availableCopiesPerBook[c.id] || []).length;
                     return (
                       <>
                         <span className="ss-chip-label">{c.titlu}</span>
@@ -466,42 +500,68 @@ export default function ImprumuturiPage() {
                 />
               </div>
 
-              {selectedAvail !== null && selectedAvail <= 0 && (
-                <div style={{
-                  background: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
-                  border: '2px solid #fca5a5',
-                  borderRadius: '12px',
-                  padding: '16px 20px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '12px',
-                  animation: 'slideDown .25s ease',
-                }}>
-                  <span style={{ fontSize: '2rem', lineHeight: 1 }}>📚</span>
-                  <div>
-                    <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '1rem', marginBottom: '4px' }}>
-                      Niciun exemplar disponibil!
+              {/* ── Exemplar specific (apare după selectarea cărții) ── */}
+              {form.carteId && (
+                <div className="form-group">
+                  <label>
+                    Exemplar specific *
+                    {availCopiesForBook.length > 0
+                      ? ` — ${availCopiesForBook.length} disponibile`
+                      : ' — niciun exemplar disponibil'}
+                  </label>
+                  {availCopiesForBook.length === 0 ? (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
+                      border: '2px solid #fca5a5', borderRadius: '12px',
+                      padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: '10px',
+                    }}>
+                      <span style={{ fontSize: '1.75rem', lineHeight: 1 }}>📚</span>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '0.95rem', marginBottom: '2px' }}>
+                          Niciun exemplar disponibil!
+                        </div>
+                        <div style={{ color: '#7f1d1d', fontSize: '.875rem' }}>
+                          Toate exemplarele din <em>„{selectedBook?.titlu}"</em> sunt momentan împrumutate.
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ color: '#7f1d1d', fontSize: '.875rem' }}>
-                      Toate cele <strong>{selectedCarte.numarExemplare || 1}</strong> exemplare din{' '}
-                      <em>„{selectedCarte.titlu}"</em> sunt momentan imprumutate.
-                      Alege alta carte sau asteapta returnarea.
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {availCopiesForBook.map(copy => (
+                        <label key={copy.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          padding: '0.5rem 0.75rem', borderRadius: 8, cursor: 'pointer',
+                          background: form.copyId === copy.id ? 'var(--blue-50, #eff6ff)' : 'var(--g50, #f9fafb)',
+                          border: `2px solid ${form.copyId === copy.id ? 'var(--primary, #2563eb)' : 'transparent'}`,
+                          transition: 'all 0.15s',
+                        }}>
+                          <input
+                            type="radio"
+                            name="copySelect"
+                            value={copy.id}
+                            checked={form.copyId === copy.id}
+                            onChange={() => setForm(f => ({ ...f, copyId: copy.id }))}
+                            style={{ accentColor: 'var(--primary, #2563eb)' }}
+                          />
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.95rem' }}>
+                            {copy.nrInregistrare || `Exemplar fără nr.`}
+                          </span>
+                          <span className="badge badge-green" style={{ marginLeft: 'auto' }}>Disponibil</span>
+                        </label>
+                      ))}
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
+              {/* ── Date ── */}
               <div className="form-row">
                 <div className="form-group">
                   <label>Data imprumut *</label>
                   <input type="date" required value={form.dataImprumut}
                     onChange={e => {
                       const d = new Date(e.target.value);
-                      setForm({
-                        ...form,
-                        dataImprumut:  toInputDate(d),
-                        dataReturnare: toInputDate(addDays(d, 14)),
-                      });
+                      setForm({ ...form, dataImprumut: toInputDate(d), dataReturnare: toInputDate(addDays(d, 14)) });
                     }} />
                 </div>
                 <div className="form-group">
@@ -516,7 +576,7 @@ export default function ImprumuturiPage() {
                   Anuleaza
                 </button>
                 <button type="submit" className="btn btn-primary"
-                  disabled={!form.elevId || !form.carteId || (selectedAvail !== null && selectedAvail <= 0)}>
+                  disabled={!form.elevId || !form.carteId || availCopiesForBook.length === 0}>
                   Inregistreaza
                 </button>
               </div>

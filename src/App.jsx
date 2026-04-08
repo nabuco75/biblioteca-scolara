@@ -4,6 +4,7 @@ import CartiPage from './pages/CartiPage';
 import ImprumuturiPage from './pages/ImprumuturiPage';
 import RapoartePage from './pages/RapoartePage';
 import RegistruInventarPage from './pages/RegistruInventarPage';
+import MigrationPage from './pages/MigrationPage';
 import AuthModal, { useAuth } from './components/AuthModal';
 
 const TABS = [
@@ -12,6 +13,7 @@ const TABS = [
   { id: 'imprumuturi',       label: 'Împrumuturi',       icon: '📖' },
   { id: 'rapoarte',          label: 'Rapoarte',          icon: '📊' },
   { id: 'registru-inventar', label: 'Registru Inventar', icon: '📋' },
+  { id: 'migrare',           label: 'Migrare Date',      icon: '🔄' },
 ];
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
         {activeTab === 'imprumuturi'       && <ImprumuturiPage />}
         {activeTab === 'rapoarte'          && <RapoartePage />}
         {activeTab === 'registru-inventar' && <RegistruInventarPage />}
+        {activeTab === 'migrare'           && <MigrationPage />}
       </main>
 
       <footer className="app-footer">
