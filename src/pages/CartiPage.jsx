@@ -29,12 +29,12 @@ function ScannerModal({ onScan, onClose }) {
           <h3>&#128269; Cititor Cod de Bare ISBN</h3>
           <button className="modal-close" onClick={onClose}>&#10005;</button>
         </div>
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
-          <div style={{ fontSize: '3.5rem', marginBottom: '1rem' }}>&#128222;</div>
-          <p style={{ marginBottom: '0.5rem', fontWeight: 600 }}>
+        <div className="scanner-modal-body">
+          <div className="scanner-modal-icon">&#128222;</div>
+          <p className="scanner-modal-title">
             Indreapta cititorul Zebra spre codul de bare
           </p>
-          <p style={{ marginBottom: '1.5rem', fontSize: '0.875rem', color: 'var(--g500, #6b7280)' }}>
+          <p className="scanner-modal-desc">
             Apasa tragaciul — ISBN-ul va aparea automat in campul de mai jos.
           </p>
           <input
@@ -45,15 +45,9 @@ function ScannerModal({ onScan, onClose }) {
             value={isbn}
             onChange={e => setIsbn(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && isbn.trim()) onScan(isbn.trim()); }}
-            style={{
-              width: '100%', padding: '0.75rem 1rem',
-              fontSize: '1.1rem', textAlign: 'center',
-              letterSpacing: '0.12em', borderRadius: '8px',
-              border: '2px solid var(--primary, #2563eb)',
-              outline: 'none', boxSizing: 'border-box',
-            }}
+            className="scanner-isbn-input"
           />
-          <p style={{ marginTop: '1rem', fontSize: '0.8rem', color: 'var(--g400, #9ca3af)' }}>
+          <p className="scanner-modal-hint">
             Sau tasteaza ISBN manual si apasa Enter
           </p>
         </div>
@@ -119,11 +113,16 @@ export default function CartiPage() {
       const books = booksSnap.docs.map(d => {
         const book = { id: d.id, ...d.data() };
         const bookCopies = copiesMap[d.id] || [];
+        const sortedCopies = [...bookCopies].sort((a, b) =>
+          String(a.nrInregistrare).localeCompare(String(b.nrInregistrare), undefined, { numeric: true })
+        );
         return {
           ...book,
-          _copies:      bookCopies,
-          _total:       bookCopies.length,
-          _disponibile: bookCopies.filter(c => c.status === 'disponibil').length,
+          _copies:           bookCopies,
+          _total:            bookCopies.length,
+          _disponibile:      bookCopies.filter(c => c.status === 'disponibil').length,
+          _nrInregistrare:   sortedCopies[0]?.nrInregistrare ?? '',   // pt. sortare
+          _nrList:           sortedCopies.map(c => c.nrInregistrare).filter(Boolean), // pt. afișare
         };
       });
 
@@ -312,6 +311,10 @@ export default function CartiPage() {
         ));
       }
 
+      if (!editingId) {
+        setSortKey('dataAdaugare');
+        setSortDir('desc');
+      }
       closeForm();
       loadCarti();
     } catch (e) { setFormError('Eroare salvare: ' + e.message); }
@@ -335,11 +338,17 @@ export default function CartiPage() {
   const filtered = carti
     .filter(c => `${c.titlu} ${c.autor} ${c.isbn} ${c.gen}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
-      const va = a[sortKey] ?? '';
-      const vb = b[sortKey] ?? '';
-      const cmp = (typeof va === 'number' && typeof vb === 'number')
-        ? va - vb
-        : String(va).localeCompare(String(vb), 'ro');
+      let va = a[sortKey] ?? '';
+      let vb = b[sortKey] ?? '';
+      // Firestore Timestamp → seconds
+      if (va && typeof va === 'object' && typeof va.seconds === 'number') va = va.seconds;
+      if (vb && typeof vb === 'object' && typeof vb.seconds === 'number') vb = vb.seconds;
+      // Nr. înregistrare → sortare numerică
+      const cmp = sortKey === '_nrInregistrare'
+        ? String(va).localeCompare(String(vb), undefined, { numeric: true })
+        : (typeof va === 'number' && typeof vb === 'number')
+          ? va - vb
+          : String(va).localeCompare(String(vb), 'ro');
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
@@ -363,6 +372,20 @@ export default function CartiPage() {
         <input className="search-input"
           placeholder="Cauta dupa titlu, autor, ISBN sau gen..."
           value={search} onChange={e => setSearch(e.target.value)} />
+        <button
+          className="btn btn-secondary"
+          title="Sortare A → Z după titlu"
+          style={{ padding: '0.4rem 0.8rem', fontWeight: sortKey === 'titlu' && sortDir === 'asc' ? 700 : 400, opacity: sortKey === 'titlu' && sortDir === 'asc' ? 1 : 0.6 }}
+          onClick={() => { setSortKey('titlu'); setSortDir('asc'); }}>
+          A→Z
+        </button>
+        <button
+          className="btn btn-secondary"
+          title="Sortare Z → A după titlu"
+          style={{ padding: '0.4rem 0.8rem', fontWeight: sortKey === 'titlu' && sortDir === 'desc' ? 700 : 400, opacity: sortKey === 'titlu' && sortDir === 'desc' ? 1 : 0.6 }}
+          onClick={() => { setSortKey('titlu'); setSortDir('desc'); }}>
+          Z→A
+        </button>
         <span className="search-count">{filtered.length} titluri</span>
       </div>
 
@@ -378,6 +401,7 @@ export default function CartiPage() {
                 <Th k="isbn">ISBN</Th>
                 <Th k="gen">Gen</Th>
                 <Th k="anPublicare">An</Th>
+                <Th k="_nrInregistrare">Nr. Înreg.</Th>
                 <th>Exemplare</th>
                 <th>Disponibile</th>
                 <th>Actiuni</th>
@@ -385,7 +409,7 @@ export default function CartiPage() {
             </thead>
             <tbody>
               {filtered.length === 0
-                ? <tr><td colSpan="10" className="empty-row">Nicio carte gasita</td></tr>
+                ? <tr><td colSpan="11" className="empty-row">Nicio carte gasita</td></tr>
                 : filtered.map((c, i) => {
                   const isExpanded = expandedId === c.id;
                   return (
@@ -393,13 +417,15 @@ export default function CartiPage() {
                       <tr key={c.id}
                         style={{ background: isExpanded ? 'var(--blue-50, #eff6ff)' : '' }}>
                         <td style={{ textAlign: 'center', padding: '0 0.25rem' }}>
-                          <button
-                            className="btn-icon"
-                            title={isExpanded ? 'Ascunde exemplare' : 'Arata exemplare'}
-                            style={{ fontSize: '0.7rem', opacity: 0.7 }}
-                            onClick={() => setExpandedId(prev => prev === c.id ? null : c.id)}>
-                            {isExpanded ? '▲' : '▼'}
-                          </button>
+                          {c._total !== 1 && (
+                            <button
+                              className="btn-icon"
+                              title={isExpanded ? 'Ascunde exemplare' : 'Arata exemplare'}
+                              style={{ fontSize: '0.7rem', opacity: 0.7 }}
+                              onClick={() => setExpandedId(prev => prev === c.id ? null : c.id)}>
+                              {isExpanded ? '▲' : '▼'}
+                            </button>
+                          )}
                         </td>
                         <td>{i + 1}</td>
                         <td>
@@ -418,6 +444,13 @@ export default function CartiPage() {
                         </td>
                         <td>{c.gen ? <span className="badge badge-blue">{c.gen}</span> : '—'}</td>
                         <td>{c.anPublicare || '—'}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--g700)', whiteSpace: 'nowrap' }}>
+                          {c._nrList.length === 0
+                            ? '—'
+                            : c._nrList.length === 1
+                              ? c._nrList[0]
+                              : <span style={{ color: 'var(--g400)', fontStyle: 'italic', fontFamily: 'sans-serif', fontSize: '0.75rem' }}>vezi detalii ▼</span>}
+                        </td>
                         <td>
                           <span className="badge badge-blue">{c._total}</span>
                         </td>
@@ -446,7 +479,7 @@ export default function CartiPage() {
                       {/* ── Rând expandabil cu exemplarele ── */}
                       {isExpanded && (
                         <tr key={`${c.id}__copies`}>
-                          <td colSpan="10" style={{
+                          <td colSpan="11" style={{
                             padding: '0 1rem 0.75rem 3.5rem',
                             background: 'var(--blue-50, #eff6ff)',
                           }}>

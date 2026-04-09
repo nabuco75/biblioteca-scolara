@@ -54,13 +54,15 @@ export default function App() {
         ))}
       </nav>
 
-      <main className="app-main">
-        {activeTab === 'elevi'             && <EleviPage />}
-        {activeTab === 'carti'             && <CartiPage />}
-        {activeTab === 'imprumuturi'       && <ImprumuturiPage />}
-        {activeTab === 'rapoarte'          && <RapoartePage />}
-        {activeTab === 'registru-inventar' && <RegistruInventarPage />}
-        {activeTab === 'migrare'           && <MigrationPage />}
+      <main className="app-main" data-page={activeTab}>
+        <div key={activeTab} className="page-enter">
+          {activeTab === 'elevi'             && <EleviPage />}
+          {activeTab === 'carti'             && <CartiPage />}
+          {activeTab === 'imprumuturi'       && <ImprumuturiPage />}
+          {activeTab === 'rapoarte'          && <RapoartePage />}
+          {activeTab === 'registru-inventar' && <RegistruInventarPage />}
+          {activeTab === 'migrare'           && <MigrationPage />}
+        </div>
       </main>
 
       <footer className="app-footer">
